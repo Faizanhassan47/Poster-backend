@@ -23,7 +23,15 @@ const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'poster_studio_super_secret_jwt_key_123';
 
 // Express Middleware
-app.use(cors());
+const allowedOrigins = [
+  'https://main-55jd1gdt8-visolemarketing650-7817s-projects.vercel.app/',
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
+app.use(cors({
+  origin: allowedOrigins.length > 0 ? allowedOrigins : '*',
+  credentials: true
+}));
 app.use(express.json());
 
 // Serve uploaded files statically
