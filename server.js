@@ -262,6 +262,6 @@ app.delete('/api/templates/:id', authenticateToken, adminOnly, async (req, res) 
 });
 
 // Start Server
-app.listen(PORT, () => {
-  console.log('\x1b[35m%s\x1b[0m', `🚀 Poster Studio Express Server running on http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log('\x1b[35m%s\x1b[0m', `🚀 Poster Studio Express Server running on http://0.0.0.0:${PORT}`);
 });
