@@ -273,6 +273,21 @@ app.post('/api/templates', authenticateToken, adminOnly, upload.single('template
       message: 'Template added successfully',
       template
     });
+
+    // If an asynchronous S3 upload was started, wait for it in the background and update DB
+    if (uploadResult.s3Promise) {
+      uploadResult.s3Promise.then(async (s3Data) => {
+        try {
+          await Template.updateOne({ _id: template._id }, { url: s3Data.url, storage: s3Data.storage });
+          console.log(`✅ Database updated with S3 URL for template ${template._id}`);
+        } catch (dbErr) {
+          console.error('❌ Failed to update DB with S3 URL:', dbErr);
+        }
+      }).catch(err => {
+        console.error('❌ iDrive E2 background upload failed:', err.message);
+      });
+    }
+
   } catch (error) {
     console.error('❌ Template upload handler failed:', error);
     res.status(500).json({ message: 'Failed to upload template', error: error.message });

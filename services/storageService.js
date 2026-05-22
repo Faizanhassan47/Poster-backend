@@ -73,9 +73,12 @@ export const uploadFile = async (fileMulter) => {
   // Always save locally first as a fallback / local cache
   await fs.promises.writeFile(localPath, fileMulter.buffer);
 
+  const localUrl = `/uploads/templates/${filename}`;
+  let s3Promise = null;
+
   if (s3Client) {
-    try {
-      console.log(`📤 Uploading template "${filename}" to iDrive E2 Bucket: ${bucketName}...`);
+    s3Promise = (async () => {
+      console.log(`📤 Background uploading template "${filename}" to iDrive E2 Bucket: ${bucketName}...`);
 
       const uploadParams = {
         Bucket: bucketName,
@@ -89,11 +92,10 @@ export const uploadFile = async (fileMulter) => {
       await s3Client.send(new PutObjectCommand(uploadParams));
 
       // Construct direct access URL using virtual-host format
-      // digital-media.s3.ap-southeast-1.idrivee2.com/filename
       const cleanEndpointDomain = endpoint.replace(/^https?:\/\//, '');
       const s3Url = `https://${bucketName}.${cleanEndpointDomain}/${filename}`;
 
-      console.log(`✅ Uploaded to iDrive E2 S3 successfully! Public URL: ${s3Url}`);
+      console.log(`✅ Background upload to iDrive E2 S3 successfully! Public URL: ${s3Url}`);
 
       // Delete local temporary cache file to free space
       try {
@@ -104,21 +106,18 @@ export const uploadFile = async (fileMulter) => {
 
       return {
         url: s3Url,
-        storage: 'idrive-e2',
-        fileId: filename,
+        storage: 'idrive-e2'
       };
-    } catch (error) {
-      console.error('❌ iDrive E2 upload failed, falling back to local static serve:', error.message);
-    }
+    })();
   }
 
-  // Local fallback url (will be served via express static server)
-  const localUrl = `/uploads/templates/${filename}`;
+  // Return instantly with local fallback url (will be served via express static server)
   return {
     url: localUrl,
     storage: 'local',
     fileId: filename,
     localPath: localPath,
+    s3Promise
   };
 };
 
