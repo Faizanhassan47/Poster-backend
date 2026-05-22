@@ -85,13 +85,14 @@ const db = {
   getAllTemplates: async () => {
     return await Template.find().sort({ createdAt: -1 });
   },
-  createTemplate: async ({ title, description, url, storage, fileId }) => {
+  createTemplate: async ({ title, description, url, storage, fileId, overlays }) => {
     return await Template.create({
       title,
       description: description || '',
       url,
       storage,
-      fileId
+      fileId,
+      overlays: overlays || undefined
     });
   },
   deleteTemplateById: async (id) => {
@@ -246,7 +247,7 @@ app.get('/api/templates', async (req, res) => {
 
 // Admin Route: Add Template
 app.post('/api/templates', authenticateToken, adminOnly, upload.single('templateImage'), async (req, res) => {
-  const { title, description } = req.body;
+  const { title, description, overlays } = req.body;
   const file = req.file;
 
   if (!title) {
@@ -254,6 +255,15 @@ app.post('/api/templates', authenticateToken, adminOnly, upload.single('template
   }
   if (!file) {
     return res.status(400).json({ message: 'Template image is required' });
+  }
+
+  let parsedOverlays;
+  if (overlays) {
+    try {
+      parsedOverlays = JSON.parse(overlays);
+    } catch (e) {
+      return res.status(400).json({ message: 'Invalid overlays format' });
+    }
   }
 
   try {
@@ -266,7 +276,8 @@ app.post('/api/templates', authenticateToken, adminOnly, upload.single('template
       description: description || '',
       url: uploadResult.url,
       storage: uploadResult.storage,
-      fileId: uploadResult.fileId
+      fileId: uploadResult.fileId,
+      overlays: parsedOverlays
     });
 
     res.status(201).json({

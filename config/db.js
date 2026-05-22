@@ -35,6 +35,26 @@ const templateSchema = new mongoose.Schema({
   url: { type: String, required: true },
   storage: { type: String, required: true },
   fileId: { type: String, required: true },
+  overlays: {
+    name: {
+      x: { type: Number, default: 50 },
+      y: { type: Number, default: 80 },
+      width: { type: Number, default: 40 },
+      height: { type: Number, default: 10 },
+      color: { type: String, default: '#000000' },
+      fontSize: { type: Number, default: 40 },
+      fontFamily: { type: String, default: 'Arial' }
+    },
+    designation: {
+      x: { type: Number, default: 50 },
+      y: { type: Number, default: 85 },
+      width: { type: Number, default: 40 },
+      height: { type: Number, default: 10 },
+      color: { type: String, default: '#000000' },
+      fontSize: { type: Number, default: 24 },
+      fontFamily: { type: String, default: 'Arial' }
+    }
+  },
   createdAt: { type: Date, default: Date.now }
 });
 
