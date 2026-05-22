@@ -8,7 +8,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 
-import { connectDB, getDbStatus, readTemplates, writeTemplates } from './config/db.js';
+import { connectDB, getDbStatus, User, Template } from './config/db.js';
 
 import { uploadFile, deleteFile, getStorageStatus } from './services/storageService.js';
 
@@ -24,12 +24,20 @@ const JWT_SECRET = process.env.JWT_SECRET || 'poster_studio_super_secret_jwt_key
 
 // Express Middleware
 const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'https://main-55jd1gdt8-visolemarketing650-7817s-projects.vercel.app',
   'https://main-55jd1gdt8-visolemarketing650-7817s-projects.vercel.app/',
   process.env.FRONTEND_URL
 ].filter(Boolean);
 
 app.use(cors({
-  origin: allowedOrigins.length > 0 ? allowedOrigins : '*',
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, Postman, curl)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(null, true); // Allow all for now; tighten in production
+  },
   credentials: true
 }));
 app.use(express.json());
@@ -55,63 +63,42 @@ const upload = multer({
 connectDB();
 
 // ==========================================
-// 1. IN-MEMORY STORE (Users)
-// ==========================================
-
-const mockUsers = [
-  {
-    _id: 'admin-id-123',
-    name: 'UmarLDS',
-    email: 'UmarLDS',
-    // bcrypt hash of "Visole@7860"
-    password: bcrypt.hashSync('Visole@7860', 10),
-    role: 'admin',
-    createdAt: new Date()
-  }
-];
-
-// ==========================================
-// 2. DATABASE ACCESS INTERFACE
+// 1. DATABASE ACCESS INTERFACE (MongoDB Mongoose)
 // ==========================================
 
 const db = {
-  // User operations (Static in-memory fallback, no database collection used)
+  // User operations querying MongoDB
   findUserByEmail: async (email) => {
-    return mockUsers.find(u => u.email.toLowerCase() === email.toLowerCase());
+    return await User.findOne({ email: email.toLowerCase() });
   },
-  createUser: async ({ name, email, password, role = 'user' }) => {
-    // Return the default admin user since registration is disabled
-    return mockUsers[0];
+  createUser: async ({ name, email, password, role = 'admin' }) => {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    return await User.create({
+      name,
+      email,
+      password: hashedPassword,
+      role
+    });
   },
 
-  // Template operations (Using JSON file database)
+  // Template operations querying MongoDB
   getAllTemplates: async () => {
-    const templates = readTemplates();
-    return [...templates].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    return await Template.find().sort({ createdAt: -1 });
   },
   createTemplate: async ({ title, description, url, storage, fileId }) => {
-    const templates = readTemplates();
-    const newTemplate = {
-      _id: `template-${Date.now()}`,
+    return await Template.create({
       title,
-      description,
+      description: description || '',
       url,
       storage,
-      fileId,
-      createdAt: new Date().toISOString()
-    };
-    templates.push(newTemplate);
-    writeTemplates(templates);
-    return newTemplate;
+      fileId
+    });
   },
   deleteTemplateById: async (id) => {
-    const templates = readTemplates();
-    const index = templates.findIndex(t => t._id === id);
-    if (index !== -1) {
-      const template = templates[index];
+    const template = await Template.findById(id);
+    if (template) {
       await deleteFile(template);
-      templates.splice(index, 1);
-      writeTemplates(templates);
+      await Template.findByIdAndDelete(id);
       return true;
     }
     return false;
@@ -153,7 +140,42 @@ const adminOnly = (req, res, next) => {
 
 // Auth Routes
 app.post('/api/auth/register', async (req, res) => {
-  res.status(403).json({ message: 'Registration is disabled. Only the default administrator account (UmarLDS) is permitted.' });
+  res.status(403).json({ message: 'Public registration is disabled. Admin accounts must be created from the Admin Console.' });
+});
+
+// Admin Route: Create multiple admin users (Only accessible by authenticated Admins)
+app.post('/api/auth/create-admin', authenticateToken, adminOnly, async (req, res) => {
+  const { name, email, password } = req.body;
+
+  if (!name || !email || !password) {
+    return res.status(400).json({ message: 'All fields (Name, Username/Email, and Password) are required.' });
+  }
+
+  try {
+    const existingUser = await db.findUserByEmail(email);
+    if (existingUser) {
+      return res.status(400).json({ message: 'An admin user with this username/email already exists.' });
+    }
+
+    const newAdmin = await db.createUser({
+      name,
+      email,
+      password,
+      role: 'admin'
+    });
+
+    res.status(201).json({
+      message: 'New admin user created successfully.',
+      user: {
+        id: newAdmin._id,
+        name: newAdmin.name,
+        email: newAdmin.email,
+        role: newAdmin.role
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to create admin user.', error: error.message });
+  }
 });
 
 app.post('/api/auth/login', async (req, res) => {
@@ -167,6 +189,10 @@ app.post('/api/auth/login', async (req, res) => {
     const user = await db.findUserByEmail(email);
     if (!user) {
       return res.status(400).json({ message: 'Invalid credentials' });
+    }
+
+    if (user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access Denied: Only administrator logins are allowed.' });
     }
 
     const validPassword = await bcrypt.compare(password, user.password);
@@ -268,6 +294,18 @@ app.delete('/api/templates/:id', authenticateToken, adminOnly, async (req, res) 
     res.status(500).json({ message: 'Failed to delete template', error: error.message });
   }
 });
+
+// Serve frontend static assets from frontend/dist
+const frontendDistPath = path.join(__dirname, '../frontend/dist');
+if (fs.existsSync(frontendDistPath)) {
+  app.use(express.static(frontendDistPath));
+  app.get('*', (req, res, next) => {
+    if (req.url.startsWith('/api')) {
+      return next();
+    }
+    res.sendFile(path.join(frontendDistPath, 'index.html'));
+  });
+}
 
 // Start Server
 app.listen(PORT, '0.0.0.0', () => {
